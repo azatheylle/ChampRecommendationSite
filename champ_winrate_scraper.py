@@ -4,9 +4,6 @@ import json
 import aiohttp
 from bs4 import BeautifulSoup
 
-# ---------------------------------------------------------------------------
-# Champion roster
-# ---------------------------------------------------------------------------
 ALL_CHAMPS: list[str] = [
     "aatrox", "ahri", "akali", "akshan", "alistar", "ambessa", "amumu",
     "anivia", "annie", "aphelios", "ashe", "aurelionsol", "aurora", "azir",
@@ -19,7 +16,7 @@ ALL_CHAMPS: list[str] = [
     "karma", "karthus", "kassadin", "katarina", "kayle", "kayn", "kennen",
     "khazix", "kindred", "kled", "kogmaw", "ksante", "leblanc", "leesin",
     "leona", "lillia", "lissandra", "lucian", "lulu", "lux", "malphite",
-    "malzahar", "maokai", "masteryi", "milio", "missfortune", "mordekaiser",
+    "malzahar", "maokai", "masteryi", "mel", "milio", "missfortune", "mordekaiser",
     "morgana", "naafiri", "nami", "nasus", "nautilus", "neeko", "nidalee",
     "nilah", "nocturne", "nunu", "olaf", "orianna", "ornn", "pantheon",
     "poppy", "pyke", "qiyana", "quinn", "rakan", "rammus", "reksai",
@@ -31,13 +28,10 @@ ALL_CHAMPS: list[str] = [
     "twistedfate", "twitch", "udyr", "urgot", "varus", "vayne", "veigar",
     "velkoz", "vex", "vi", "viego", "viktor", "vladimir", "volibear",
     "warwick", "wukong", "xayah", "xerath", "xinzhao", "yasuo", "yone",
-    "yorick", "yuumi", "zac", "zed", "zeri", "ziggs", "zilean", "zoe",
+    "yorick", "yuumi", "yunara", "zaahen", "zac", "zed", "zeri", "ziggs", "zilean", "zoe",
     "zyra",
 ]
 
-# ---------------------------------------------------------------------------
-# Mappings (UI label → lolalytics URL parameter)
-# ---------------------------------------------------------------------------
 RANK_MAP: dict[str, str] = {
     "All": "all",
     "Gold+": "gold_plus",
@@ -55,7 +49,7 @@ LANE_MAP: dict[str, str] = {
     "Support": "support",
 }
 
-_REQUEST_TIMEOUT = 15  # seconds per lolalytics HTTP request
+_REQUEST_TIMEOUT = 15  # seconds per request
 
 _HEADERS = {
     "User-Agent": (
@@ -64,10 +58,6 @@ _HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     )
 }
-
-# ---------------------------------------------------------------------------
-# URL builder
-# ---------------------------------------------------------------------------
 
 def makelink(champ: str, picked_champ: str, mylane: str, picked_lane: str, rank: str) -> str:
     """Build the lolalytics matchup URL for champ (in mylane) vs picked_champ (in picked_lane)."""
@@ -78,10 +68,6 @@ def makelink(champ: str, picked_champ: str, mylane: str, picked_lane: str, rank:
         f"https://lolalytics.com/lol/{champ}/vs/{picked_champ}/"
         f"?lane={lane_param}&tier={rank_param}&vslane={vslane_param}"
     )
-
-# ---------------------------------------------------------------------------
-# Single-URL winrate scraper
-# ---------------------------------------------------------------------------
 
 async def get_winrate_from_web(session: aiohttp.ClientSession, url: str) -> float:
     """
@@ -105,7 +91,7 @@ async def get_winrate_from_web(session: aiohttp.ClientSession, url: str) -> floa
         # The head-to-head win rate lives at:
         #   props.pageProps.headerData.win / props.pageProps.headerData.games
         # which is also rendered into a visible element with class "WinRate".
-        # We try both approaches so the scraper is resilient to minor HTML changes.
+        
 
         # Approach 1 – rendered HTML element
         el = soup.select_one("div.WinRate, span.WinRate, [class*='WinRate']")
@@ -130,10 +116,6 @@ async def get_winrate_from_web(session: aiohttp.ClientSession, url: str) -> floa
     except Exception:
         return 0.0
 
-# ---------------------------------------------------------------------------
-# Per-picked-champ winrate storage
-# ---------------------------------------------------------------------------
-
 async def winrate_storage(
     session: aiohttp.ClientSession,
     picked_champ: str,
@@ -151,10 +133,6 @@ async def winrate_storage(
     urls = [makelink(c, picked_champ, mylane, picked_lane, rank) for c in candidate_champs]
     results = await asyncio.gather(*(get_winrate_from_web(session, u) for u in urls))
     return dict(zip(candidate_champs, results))
-
-# ---------------------------------------------------------------------------
-# Main recommendation calculator
-# ---------------------------------------------------------------------------
 
 async def calculate_recommendations(
     mylane: str,
