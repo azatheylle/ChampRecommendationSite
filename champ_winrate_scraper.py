@@ -1,11 +1,8 @@
-import requests
 from bs4 import BeautifulSoup
 import aiohttp
 import asyncio
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-
+from fastapi import FastAPI, HTTPException, Query
 
 lane_mapping = {
     "Top": "vslane=top",
@@ -25,63 +22,43 @@ rank_mapping = {
 }
 
 
-class RecommendationRequest(BaseModel):
-    rank: str = "Platinum+"
-    mylane: str = "Top"
-    top: str = ""
-    jungle: str = ""
-    middle: str = ""
-    bottom: str = ""
-    support: str = ""
-
-
-def get_pickedchamp(payload: RecommendationRequest):
-    champs = [
-        payload.top,
-        payload.jungle,
-        payload.middle,
-        payload.bottom,
-        payload.support,
-    ]
-    champs = [champ.strip().lower() for champ in champs if champ.strip() != ""]
+def get_pickedchamp(top: str, jungle: str, middle: str, bottom: str, support: str):
+    champs = [top, jungle, middle, bottom, support]
+    champs = [champ.strip() for champ in champs if champ.strip() != ""]
     return champs
 
 
-def get_lane_for_champ(champ, payload: RecommendationRequest):
-    if payload.top.strip().lower() == champ:
+def get_lane_for_champ(champ: str, top: str, jungle: str, middle: str, bottom: str, support: str):
+    if top.strip() == champ:
         return "top"
-    if payload.jungle.strip().lower() == champ:
+    if jungle.strip() == champ:
         return "jungle"
-    if payload.middle.strip().lower() == champ:
+    if middle.strip() == champ:
         return "middle"
-    if payload.bottom.strip().lower() == champ:
+    if bottom.strip() == champ:
         return "bottom"
-    if payload.support.strip().lower() == champ:
+    if support.strip() == champ:
         return "support"
     return None
 
 
-async def calculate_winrates(payload: RecommendationRequest):
-    pickedchamps = get_pickedchamp(payload)
+async def calculate_winrates(rank: str, mylane: str, top: str, jungle: str, middle: str, bottom: str, support: str):
+    pickedchamps = get_pickedchamp(top, jungle, middle, bottom, support)
 
     if not pickedchamps:
         raise HTTPException(status_code=400, detail="Please enter at least one champion.")
 
-    invalid = [champ for champ in pickedchamps if champ not in all_champs]
-    if invalid:
-        raise HTTPException(status_code=400, detail=f"Invalid champion(s): {', '.join(invalid)}")
-
-    if payload.rank not in rank_mapping:
+    if rank not in rank_mapping:
         raise HTTPException(status_code=400, detail="Invalid rank value.")
-    if payload.mylane not in lane_mapping:
+    if mylane not in lane_mapping:
         raise HTTPException(status_code=400, detail="Invalid mylane value.")
 
     winrates = {}
 
     for champ in pickedchamps:
-        lane = get_lane_for_champ(champ, payload)
+        lane = get_lane_for_champ(champ, top, jungle, middle, bottom, support)
         if lane:
-            champ_winrates = await winrate_storage(champ, {}, lane, all_champs, payload.mylane, payload.rank)
+            champ_winrates = await winrate_storage(champ, {}, lane, all_champs, mylane, rank)
             for enemy, winrate in champ_winrates.items():
                 if enemy in winrates:
                     winrates[enemy] = (winrates[enemy] + winrate) / 2
@@ -96,11 +73,6 @@ async def calculate_winrates(payload: RecommendationRequest):
     return result
 
 
-def get_winrate(pickedchamp, winrate, entry, mylane, rank):
-    winrate = winrate_storage(pickedchamp, winrate, entry, all_champs, mylane, rank)
-    return winrate
-
-
 async def get_winrate_from_web(session, pickedchamp, champ, entry, mylane, rank):
     url = makelink(pickedchamp, champ, entry, mylane, rank)
 
@@ -111,11 +83,11 @@ async def get_winrate_from_web(session, pickedchamp, champ, entry, mylane, rank)
                 return 100
 
             html = await response.text()
-            soup = BeautifulSoup(html, 'lxml')
-            winrate_element = soup.find('div', class_='mb-1 font-bold')
+            soup = BeautifulSoup(html, "lxml")
+            winrate_element = soup.find("div", class_="mb-1 font-bold")
 
             if winrate_element:
-                winrate_text = winrate_element.get_text().strip('%')
+                winrate_text = winrate_element.get_text().strip("%")
                 print(f"Successfully fetched {url} wr={winrate_text}")
                 return float(winrate_text)
             else:
@@ -130,7 +102,8 @@ async def get_winrate_from_web(session, pickedchamp, champ, entry, mylane, rank)
         return 0.0
 
 
-all_champs = ["aatrox", "ahri", "akali", "akshan", "alistar", "ambessa", "amumu",
+all_champs = [
+    "aatrox", "ahri", "akali", "akshan", "alistar", "ambessa", "amumu",
     "anivia", "annie", "aphelios", "ashe", "aurelionsol", "aurora", "azir",
     "bard", "belveth", "blitzcrank", "brand", "braum", "briar", "caitlyn",
     "camille", "cassiopeia", "chogath", "corki", "darius", "diana", "draven",
@@ -153,8 +126,8 @@ all_champs = ["aatrox", "ahri", "akali", "akshan", "alistar", "ambessa", "amumu"
     "twistedfate", "twitch", "udyr", "urgot", "varus", "vayne", "veigar",
     "velkoz", "vex", "vi", "viego", "viktor", "vladimir", "volibear",
     "warwick", "wukong", "xayah", "xerath", "xinzhao", "yasuo", "yone",
-    "yorick", "yuumi", "yunara", "zaahen", "zac", "zed", "zeri", "ziggs", "zilean", "zoe",
-    "zyra",
+    "yorick", "yuumi", "yunara", "zaahen", "zac", "zed", "zeri", "ziggs",
+    "zilean", "zoe", "zyra",
 ]
 
 
@@ -163,7 +136,11 @@ async def winrate_storage(pickedchamp, winrate, entry, all_champs, mylane, rank)
     winrate = {}
 
     async with aiohttp.ClientSession() as session:
-        tasks = [get_winrate_from_web(session, pickedchamp, champ, entry, mylane, rank) for champ in all_champs if champ != pickedchamp]
+        tasks = [
+            get_winrate_from_web(session, pickedchamp, champ, entry, mylane, rank)
+            for champ in all_champs
+            if champ != pickedchamp
+        ]
         results = await asyncio.gather(*tasks)
 
     idx = 0
@@ -201,18 +178,26 @@ def makelink(pickedchamp, champ, entry, mylane, rank):
 app = FastAPI(title="Bad Champ Recommendation API")
 
 
-@app.post("/api/recommendations")
-async def recommendations(payload: RecommendationRequest):
-    results = await calculate_winrates(payload)
+@app.get("/api/recommendations")
+async def recommendations(
+    rank: str = Query("Platinum+"),
+    mylane: str = Query("Top"),
+    top: str = Query(""),
+    jungle: str = Query(""),
+    middle: str = Query(""),
+    bottom: str = Query(""),
+    support: str = Query(""),
+):
+    results = await calculate_winrates(rank, mylane, top, jungle, middle, bottom, support)
     return {
-        "rank": payload.rank,
-        "mylane": payload.mylane,
+        "rank": rank,
+        "mylane": mylane,
         "picks": {
-            "top": payload.top.strip().lower(),
-            "jungle": payload.jungle.strip().lower(),
-            "middle": payload.middle.strip().lower(),
-            "bottom": payload.bottom.strip().lower(),
-            "support": payload.support.strip().lower(),
+            "top": top.strip(),
+            "jungle": jungle.strip(),
+            "middle": middle.strip(),
+            "bottom": bottom.strip(),
+            "support": support.strip(),
         },
         "count": len(results),
         "results": results,
